@@ -1,0 +1,79 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-shopuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-localdevpassword}
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+    restart: unless-stopped
+
+  user-service:
+    build: ./services/user-service
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-shopuser}:${POSTGRES_PASSWORD:-localdevpassword}@postgres:5432/users_db
+      JWT_SECRET: ${JWT_SECRET:-local-demo-secret-change-me}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+
+  product-service:
+    build: ./services/product-service
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-shopuser}:${POSTGRES_PASSWORD:-localdevpassword}@postgres:5432/products_db
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+
+  payment-service:
+    build: ./services/payment-service
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-shopuser}:${POSTGRES_PASSWORD:-localdevpassword}@postgres:5432/payments_db
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+
+  notification-service:
+    build: ./services/notification-service
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-shopuser}:${POSTGRES_PASSWORD:-localdevpassword}@postgres:5432/notifications_db
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+
+  order-service:
+    build: ./services/order-service
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-shopuser}:${POSTGRES_PASSWORD:-localdevpassword}@postgres:5432/orders_db
+      PRODUCT_SERVICE_URL: http://product-service:5000
+      PAYMENT_SERVICE_URL: http://payment-service:5000
+      NOTIFICATION_SERVICE_URL: http://notification-service:5000
+    depends_on:
+      postgres: { condition: service_healthy }
+      product-service: { condition: service_started }
+      payment-service: { condition: service_started }
+      notification-service: { condition: service_started }
+    restart: unless-stopped
+
+  web:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - user-service
+      - product-service
+      - order-service
+      - payment-service
+      - notification-service
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

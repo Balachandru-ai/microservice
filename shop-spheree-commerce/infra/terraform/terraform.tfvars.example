@@ -1,0 +1,4 @@
+aws_region = "ap-south-1"
+project_name = "shopsphere"
+vpc_id = "vpc-xxxxxxxx"
+private_subnet_ids = ["subnet-aaaaaaaa", "subnet-bbbbbbbb"]

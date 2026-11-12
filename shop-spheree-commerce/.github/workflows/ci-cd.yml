@@ -1,0 +1,46 @@
+name: Build and publish ShopSphere images
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: user-service
+            context: ./services/user-service
+          - name: product-service
+            context: ./services/product-service
+          - name: order-service
+            context: ./services/order-service
+          - name: payment-service
+            context: ./services/payment-service
+          - name: notification-service
+            context: ./services/notification-service
+          - name: frontend
+            context: ./frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: aws-actions/amazon-ecr-login@v2
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/${{ matrix.name }}:${{ github.sha }}
+            ${{ env.ECR_REGISTRY }}/${{ matrix.name }}:latest
