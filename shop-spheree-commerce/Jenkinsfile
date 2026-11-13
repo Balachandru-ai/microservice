@@ -1,0 +1,109 @@
+pipeline {
+    agent any
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+        timeout(time: 30, unit: 'MINUTES')
+    }
+
+    environment {
+        COMPOSE_PROJECT_NAME = 'shop-spheree-commerce'
+        APP_URL = 'http://localhost'
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                echo 'Checking out ShopSphere source code...'
+                checkout scm
+            }
+        }
+
+        stage('Validate Docker Compose') {
+            steps {
+                sh '''
+                    set -e
+                    echo "Checking Docker..."
+                    docker --version
+
+                    echo "Checking Docker Compose..."
+                    docker compose version
+
+                    echo "Validating docker-compose.yml..."
+                    docker compose --env-file "$ENV_FILE" config -q
+                '''
+            }
+        }
+
+        stage('Build Docker Images') {
+            steps {
+                sh '''
+                    set -e
+                    echo "Building ShopSphere images..."
+                    docker compose --env-file "$ENV_FILE" build
+                '''
+            }
+        }
+
+        stage('Deploy Application') {
+            steps {
+                sh '''
+                    set -e
+                    echo "Deploying ShopSphere..."
+
+                    docker compose --env-file "$ENV_FILE" \
+                        up -d --remove-orphans
+
+                    echo "Deployment command completed."
+                '''
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                sh '''
+                    set -e
+
+                    echo "Waiting for frontend..."
+                    for i in $(seq 1 30); do
+                        if curl -fsS "$APP_URL/api/products" > /dev/null; then
+                            echo "Product API is responding!"
+                            break
+                        fi
+
+                        if [ "$i" -eq 30 ]; then
+                            echo "Product API health check failed!"
+                            docker compose ps
+                            exit 1
+                        fi
+
+                        sleep 5
+                    done
+
+                    echo "Checking user service..."
+                    curl -fsS "$APP_URL/api/users/health"
+
+                    echo "Checking containers..."
+                    docker compose ps
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'SUCCESS: ShopSphere deployed successfully!'
+        }
+
+        failure {
+            echo 'FAILED: ShopSphere deployment failed.'
+            sh 'docker compose ps || true'
+        }
+
+        always {
+            echo 'ShopSphere CI/CD pipeline finished.'
+        }
+    }
+}
