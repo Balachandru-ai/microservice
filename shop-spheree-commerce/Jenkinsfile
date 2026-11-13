@@ -11,6 +11,7 @@ pipeline {
     environment {
         COMPOSE_PROJECT_NAME = 'shop-spheree-commerce'
         APP_URL = 'http://localhost'
+        PROJECT_DIR = 'shop-spheree-commerce'
     }
 
     stages {
@@ -22,90 +23,151 @@ pipeline {
             }
         }
 
-        stage('Validate Docker Compose') {
+        stage('Check Project Structure') {
             steps {
-                withCredentials([
-                    file(credentialsId: 'shopsphere-env',
-                         variable: 'ENV_FILE')
-                ]) {
+                dir("${PROJECT_DIR}") {
                     sh '''
                         set -e
 
-                        echo "Checking Docker..."
-                        docker --version
+                        echo "Checking project files..."
+                        pwd
+                        ls -la
 
-                        echo "Checking Docker Compose..."
-                        docker-compose --version
+                        test -f docker-compose.yml
 
-                        echo "Validating docker-compose.yml..."
-                        docker-compose --env-file "$ENV_FILE" config -q
+                        echo "Docker Compose file found!"
                     '''
+                }
+            }
+        }
+
+        stage('Validate Docker Compose') {
+            steps {
+                dir("${PROJECT_DIR}") {
+                    withCredentials([
+                        file(
+                            credentialsId: 'shopsphere-env',
+                            variable: 'ENV_FILE'
+                        )
+                    ]) {
+                        sh '''
+                            set -e
+
+                            echo "Checking Docker..."
+                            docker --version
+
+                            echo "Checking Docker Compose..."
+                            docker-compose --version
+
+                            echo "Validating Docker Compose configuration..."
+                            docker-compose \
+                                --env-file "$ENV_FILE" \
+                                -f docker-compose.yml config -q
+
+                            echo "Configuration validation successful!"
+                        '''
+                    }
                 }
             }
         }
 
         stage('Build Docker Images') {
             steps {
-                withCredentials([
-                    file(credentialsId: 'shopsphere-env',
-                         variable: 'ENV_FILE')
-                ]) {
-                    sh '''
-                        set -e
-                        echo "Building ShopSphere images..."
-                        docker-compose --env-file "$ENV_FILE" build
-                    '''
+                dir("${PROJECT_DIR}") {
+                    withCredentials([
+                        file(
+                            credentialsId: 'shopsphere-env',
+                            variable: 'ENV_FILE'
+                        )
+                    ]) {
+                        sh '''
+                            set -e
+
+                            echo "Building ShopSphere images..."
+
+                            docker-compose \
+                                --env-file "$ENV_FILE" \
+                                -f docker-compose.yml build
+
+                            echo "Docker images built successfully!"
+                        '''
+                    }
                 }
             }
         }
 
         stage('Deploy Application') {
             steps {
-                withCredentials([
-                    file(credentialsId: 'shopsphere-env',
-                         variable: 'ENV_FILE')
-                ]) {
-                    sh '''
-                        set -e
-                        echo "Deploying ShopSphere..."
+                dir("${PROJECT_DIR}") {
+                    withCredentials([
+                        file(
+                            credentialsId: 'shopsphere-env',
+                            variable: 'ENV_FILE'
+                        )
+                    ]) {
+                        sh '''
+                            set -e
 
-                        docker-compose --env-file "$ENV_FILE" \
-                            up -d --remove-orphans
+                            echo "Deploying ShopSphere..."
 
-                        echo "Deployment completed."
-                    '''
+                            docker-compose \
+                                --env-file "$ENV_FILE" \
+                                -f docker-compose.yml \
+                                up -d --remove-orphans
+
+                            echo "Deployment completed!"
+                        '''
+                    }
                 }
             }
         }
 
         stage('Verify Deployment') {
             steps {
-                sh '''
-                    set -e
+                dir("${PROJECT_DIR}") {
+                    sh '''
+                        set -e
 
-                    echo "Waiting for frontend..."
+                        echo "Checking running containers..."
 
-                    for i in $(seq 1 30); do
-                        if curl -fsS "$APP_URL/api/products" > /dev/null; then
-                            echo "Product API is responding!"
-                            break
-                        fi
+                        docker-compose \
+                            -f docker-compose.yml ps
 
-                        if [ "$i" -eq 30 ]; then
-                            echo "Product API health check failed!"
-                            docker-compose ps
-                            exit 1
-                        fi
+                        echo "Waiting for Product API..."
 
-                        sleep 5
-                    done
+                        for i in $(seq 1 30); do
 
-                    echo "Checking user service..."
-                    curl -fsS "$APP_URL/api/users/health"
+                            if curl -fsS \
+                                "$APP_URL/api/products" > /dev/null; then
 
-                    echo "Checking containers..."
-                    docker-compose ps
-                '''
+                                echo "Product API is responding!"
+                                break
+                            fi
+
+                            if [ "$i" -eq 30 ]; then
+                                echo "Product API health check failed!"
+
+                                docker-compose \
+                                    -f docker-compose.yml ps
+
+                                exit 1
+                            fi
+
+                            sleep 5
+                        done
+
+                        echo "Checking User API..."
+
+                        curl -fsS "$APP_URL/api/users/health"
+
+                        echo "Checking final container status..."
+
+                        docker-compose \
+                            -f docker-compose.yml ps
+
+                        echo "ShopSphere verification completed!"
+                    '''
+                }
             }
         }
     }
@@ -117,7 +179,13 @@ pipeline {
 
         failure {
             echo 'FAILED: ShopSphere deployment failed.'
-            sh 'docker-compose ps || true'
+
+            dir('shop-spheree-commerce') {
+                sh '''
+                    docker-compose \
+                        -f docker-compose.yml ps || true
+                '''
+            }
         }
 
         always {
