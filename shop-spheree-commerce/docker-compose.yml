@@ -1,5 +1,7 @@
-
 services:
+  # ==============================
+  # POSTGRESQL DATABASE
+  # ==============================
   postgres:
     image: postgres:16-alpine
     environment:
@@ -16,6 +18,9 @@ services:
       retries: 15
     restart: unless-stopped
 
+  # ==============================
+  # USER SERVICE
+  # ==============================
   user-service:
     build: ./services/user-service
     environment:
@@ -27,6 +32,9 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # ==============================
+  # PRODUCT SERVICE
+  # ==============================
   product-service:
     build: ./services/product-service
     environment:
@@ -36,6 +44,9 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # ==============================
+  # PAYMENT SERVICE
+  # ==============================
   payment-service:
     build: ./services/payment-service
     environment:
@@ -45,6 +56,9 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # ==============================
+  # NOTIFICATION SERVICE
+  # ==============================
   notification-service:
     build: ./services/notification-service
     environment:
@@ -54,6 +68,9 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # ==============================
+  # ORDER SERVICE
+  # ==============================
   order-service:
     build: ./services/order-service
     environment:
@@ -72,6 +89,9 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  # ==============================
+  # FRONTEND WEB
+  # ==============================
   web:
     build: ./frontend
     ports:
@@ -84,5 +104,92 @@ services:
       - notification-service
     restart: unless-stopped
 
+  # ==============================
+  # PROMETHEUS
+  # ==============================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: shopsphere-prometheus
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+    depends_on:
+      - node-exporter
+      - cadvisor
+      - postgres-exporter
+    restart: unless-stopped
+
+  # ==============================
+  # GRAFANA
+  # ==============================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: shopsphere-grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-ChangeThisStrongPassword}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  # ==============================
+  # NODE EXPORTER - EC2 MONITORING
+  # ==============================
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: shopsphere-node-exporter
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/host'
+    pid: host
+    volumes:
+      - '/:/host:ro,rslave'
+    restart: unless-stopped
+
+  # ==============================
+  # CADVISOR - DOCKER MONITORING
+  # ==============================
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: shopsphere-cadvisor
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+    restart: unless-stopped
+
+  # ==============================
+  # POSTGRESQL EXPORTER
+  # ==============================
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: shopsphere-postgres-exporter
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-shopuser}:${POSTGRES_PASSWORD_URL:-localdevpassword}@postgres:5432/postgres?sslmode=disable"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+# ==============================
+# PERSISTENT VOLUMES
+# ==============================
 volumes:
   postgres_data:
+  prometheus_data:
+  grafana_data:
