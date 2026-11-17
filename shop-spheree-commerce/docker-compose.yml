@@ -93,7 +93,7 @@ services:
   # FRONTEND WEB
   # ==============================
   web:
-    build: ./frontend
+    buildo: ./frontend
     ports:
       - "80:80"
     depends_on:
@@ -130,7 +130,7 @@ services:
     image: grafana/grafana:latest
     container_name: shopsphere-grafana
     ports:
-      - "127.0.0.1:3000:3000"
+      - "3000:3000"
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-ChangeThisStrongPassword}
