@@ -30,12 +30,15 @@ pipeline {
                         set -e
 
                         echo "Checking project files..."
+
                         pwd
                         ls -la
 
                         test -f docker-compose.yml
+                        test -f monitoring/prometheus/prometheus.yml
+                        test -f monitoring/grafana/provisioning/datasources/prometheus.yml
 
-                        echo "Docker Compose file found!"
+                        echo "Project structure verified!"
                     '''
                 }
             }
@@ -59,7 +62,8 @@ pipeline {
                             echo "Checking Docker Compose..."
                             docker-compose --version
 
-                            echo "Validating Docker Compose configuration..."
+                            echo "Validating Docker Compose..."
+
                             docker-compose \
                                 --env-file "$ENV_FILE" \
                                 -f docker-compose.yml config -q
@@ -96,7 +100,7 @@ pipeline {
             }
         }
 
-        stage('Deploy Application') {
+        stage('Deploy Application and Monitoring') {
             steps {
                 dir("${PROJECT_DIR}") {
                     withCredentials([
@@ -115,23 +119,23 @@ pipeline {
                                 -f docker-compose.yml \
                                 up -d --remove-orphans
 
-                            echo "Deployment completed!"
+                            echo "ShopSphere application deployed!"
+                            echo "Prometheus and Grafana deployed!"
                         '''
                     }
                 }
             }
         }
 
-        stage('Verify Deployment') {
+        stage('Verify Application') {
             steps {
                 dir("${PROJECT_DIR}") {
                     sh '''
                         set -e
 
-                        echo "Checking running containers..."
+                        echo "Checking application containers..."
 
-                        docker-compose \
-                            -f docker-compose.yml ps
+                        docker-compose ps
 
                         echo "Waiting for Product API..."
 
@@ -146,10 +150,7 @@ pipeline {
 
                             if [ "$i" -eq 30 ]; then
                                 echo "Product API health check failed!"
-
-                                docker-compose \
-                                    -f docker-compose.yml ps
-
+                                docker-compose ps
                                 exit 1
                             fi
 
@@ -160,12 +161,80 @@ pipeline {
 
                         curl -fsS "$APP_URL/api/users/health"
 
-                        echo "Checking final container status..."
+                        echo "Application verification successful!"
+                    '''
+                }
+            }
+        }
 
-                        docker-compose \
-                            -f docker-compose.yml ps
+        stage('Verify Monitoring') {
+            steps {
+                dir("${PROJECT_DIR}") {
+                    sh '''
+                        set -e
 
-                        echo "ShopSphere verification completed!"
+                        echo "Checking monitoring containers..."
+
+                        for service in prometheus grafana node-exporter cadvisor postgres-exporter; do
+
+                            if ! docker-compose ps "$service" | grep -q "Up"; then
+                                echo "ERROR: $service is not running!"
+                                docker-compose logs --tail=50 "$service"
+                                exit 1
+                            fi
+
+                            echo "$service is running!"
+                        done
+
+                        echo "Checking Prometheus readiness..."
+
+                        for i in $(seq 1 20); do
+                            if docker-compose exec -T prometheus \
+                                wget -qO- http://localhost:9090/-/ready > /dev/null; then
+                                echo "Prometheus is ready!"
+                                break
+                            fi
+
+                            if [ "$i" -eq 20 ]; then
+                                echo "Prometheus readiness check failed!"
+                                exit 1
+                            fi
+
+                            sleep 3
+                        done
+
+                        echo "Checking Grafana readiness..."
+
+                        for i in $(seq 1 20); do
+                            if docker-compose exec -T grafana \
+                                wget -qO- http://localhost:3000/api/health > /dev/null; then
+                                echo "Grafana is ready!"
+                                break
+                            fi
+
+                            if [ "$i" -eq 20 ]; then
+                                echo "Grafana readiness check failed!"
+                                exit 1
+                            fi
+
+                            sleep 3
+                        done
+
+                        echo "All monitoring services are ready!"
+                    '''
+                }
+            }
+        }
+
+        stage('Final Deployment Status') {
+            steps {
+                dir("${PROJECT_DIR}") {
+                    sh '''
+                        echo "Final ShopSphere container status..."
+
+                        docker-compose ps
+
+                        echo "Deployment and monitoring verification completed!"
                     '''
                 }
             }
@@ -174,16 +243,15 @@ pipeline {
 
     post {
         success {
-            echo 'SUCCESS: ShopSphere deployed successfully!'
+            echo 'SUCCESS: ShopSphere and monitoring deployed successfully!'
         }
 
         failure {
-            echo 'FAILED: ShopSphere deployment failed.'
+            echo 'FAILED: ShopSphere deployment or monitoring verification failed.'
 
             dir('shop-spheree-commerce') {
                 sh '''
-                    docker-compose \
-                        -f docker-compose.yml ps || true
+                    docker-compose ps || true
                 '''
             }
         }
